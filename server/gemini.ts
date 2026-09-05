@@ -15,12 +15,13 @@ const getGeminiClient = () => {
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
     return null;
   }
+  const cleanKey = apiKey.trim();
   // gen-lang-client reference is a GCP client/project identifier, not an API key
-  if (apiKey.startsWith('gen-lang-client')) {
+  if (cleanKey.startsWith('gen-lang-client')) {
     return null;
   }
   return new GoogleGenAI({
-    apiKey: apiKey,
+    apiKey: cleanKey,
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -63,8 +64,8 @@ function isNonRetryableError(error: any): boolean {
 }
 
 /**
- * Executes a Gemini generateContent request with multi-model fallback and exponential backoff retry.
- * Handles transient 503 (model high demand / UNAVAILABLE) and 429 rate limits gracefully.
+ * Executes a Gemini generateContent request with multi-model fallback and bounded timeout.
+ * Fast-fails on timeout or provider error to guarantee serverless execution within budget.
  */
 async function callGeminiWithFallback(
   client: GoogleGenAI,
@@ -73,14 +74,14 @@ async function callGeminiWithFallback(
     config?: any;
   }
 ): Promise<{ text: string; modelUsed: string }> {
-  // Primary model from system guidelines (gemini-3.8-flash) with fallback
-  const candidateModels = ['gemini-3.8-flash', 'gemini-2.5-flash'];
+  // Primary GA fast model with fallback to latest flash model
+  const candidateModels = ['gemini-2.5-flash', 'gemini-3.8-flash'];
   let lastError: any = null;
 
   for (const model of candidateModels) {
     try {
       const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('AI generation timed out after 1500ms')), 1500)
+        setTimeout(() => reject(new Error('AI generation timed out after 2500ms')), 2500)
       );
 
       const generatePromise = client.models.generateContent({
@@ -97,11 +98,8 @@ async function callGeminiWithFallback(
       }
     } catch (err: any) {
       lastError = err;
-      // If error is quota or credentials related or timed out, trying another model will only cause prolonged delay
-      if (isNonRetryableError(err) || (err?.message && err.message.includes('timed out'))) {
-        break;
-      }
-      continue;
+      // Fast-fail: break immediately on any timeout or provider error to prevent compounding latency
+      break;
     }
   }
 

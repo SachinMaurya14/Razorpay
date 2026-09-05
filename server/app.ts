@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import { incidentStore } from './incidentStore';
 import { syntheticEngine } from './syntheticData';
@@ -6,10 +9,63 @@ import { SimulationScenarioId } from '../src/types';
 
 export const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+// 1. Pre-parse body detection and path normalization MUST run before express.json()
+// to prevent Vercel Serverless Function stream-consumption deadlocks.
+app.use((req, res, next) => {
+  if (req.body) {
+    if (typeof req.body === 'string') {
+      try {
+        req.body = JSON.parse(req.body);
+      } catch {
+        // Keep string if not valid JSON
+      }
+    } else if (Buffer.isBuffer(req.body)) {
+      try {
+        req.body = JSON.parse(req.body.toString('utf-8'));
+      } catch {
+        // Keep buffer if not valid JSON
+      }
+    }
+    // Mark as parsed so express.json() / body-parser will safely skip reading the stream
+    (req as any)._body = true;
+  }
 
-// Standard CORS & security headers for same-origin and preview execution
+  // Path normalization for Vercel rewrites and proxy headers
+  const endpoint = (req.query && (req.query.endpoint || req.query.path || req.query.all)) as string | string[] | undefined;
+  const forwardedUri = (req.headers['x-forwarded-uri'] as string) || 
+                       (req.headers['x-matched-path'] as string) || 
+                       (req.headers['x-vercel-matched-path'] as string);
+
+  if (endpoint) {
+    const subpath = Array.isArray(endpoint) ? endpoint.join('/') : endpoint;
+    const cleanSubpath = subpath.startsWith('/') ? subpath : '/' + subpath;
+    if (req.query) {
+      delete (req.query as any).endpoint;
+      delete (req.query as any).path;
+      delete (req.query as any).all;
+    }
+    const remainingKeys = Object.keys(req.query || {});
+    if (remainingKeys.length > 0) {
+      const sp = new URLSearchParams();
+      for (const k of remainingKeys) {
+        const val = (req.query as any)[k];
+        if (Array.isArray(val)) {
+          val.forEach(v => sp.append(k, String(v)));
+        } else if (val !== undefined) {
+          sp.append(k, String(val));
+        }
+      }
+      req.url = `${cleanSubpath}?${sp.toString()}`;
+    } else {
+      req.url = cleanSubpath;
+    }
+  } else if (forwardedUri && (req.url === '/' || req.url === '/api' || req.url === '/api/')) {
+    req.url = forwardedUri;
+  }
+  next();
+});
+
+// 2. Standard CORS & security headers for same-origin and preview execution
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
@@ -20,20 +76,9 @@ app.use((req, res, next) => {
   next();
 });
 
-// Path normalization middleware: handles Vercel serverless query/rewrites
-app.use((req, res, next) => {
-  const forwardedUri = (req.headers['x-forwarded-uri'] as string) || (req.headers['x-matched-path'] as string);
-  if (forwardedUri && (req.url === '/' || req.url === '/api' || req.url === '/api/')) {
-    req.url = forwardedUri;
-  }
-  if (req.query && (req.query as any).all) {
-    const subpath = Array.isArray((req.query as any).all) 
-      ? (req.query as any).all.join('/') 
-      : (req.query as any).all;
-    req.url = '/' + subpath;
-  }
-  next();
-});
+// 3. Body parsers (safely skip if _body is already marked true above)
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 
 // Consolidated health metrics computed directly against authoritative incident and scorecard store
 export const computeConsolidatedHealth = () => {
