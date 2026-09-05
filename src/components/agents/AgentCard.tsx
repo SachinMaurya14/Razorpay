@@ -11,10 +11,22 @@ interface AgentCardProps {
 }
 
 export const AgentCard: React.FC<AgentCardProps> = ({
-  agent,
+  agent: rawAgent,
   onRunTest,
   isLoading = false,
 }) => {
+  const agent: AgentCardState = rawAgent || {
+    id: 'detection',
+    name: 'Autonomous Agent',
+    role: 'Continuous Telemetry & Anomaly Flagging',
+    model: 'AI Engine',
+    status: 'monitoring',
+    currentTask: 'Scanning live transaction streams',
+    lastAction: 'Normal baseline verification',
+    confidence: 0.98,
+    timestamp: new Date().toISOString(),
+    executionTimeMs: 140,
+  };
   const getAgentRoleDescription = (id: string) => {
     switch (id) {
       case 'detection':

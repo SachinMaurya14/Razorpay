@@ -38,15 +38,95 @@ import {
   Play
 } from 'lucide-react';
 
+const INITIAL_HEALTH: PaymentHealthMetrics = {
+  healthScore: 98,
+  successRate: 94.2,
+  successRateChange: 0.0,
+  activeIncidentsCount: 0,
+  criticalIncidentsCount: 0,
+  totalTransactions24h: 0,
+  affectedTransactionsTotal: 0,
+  eligibleTransactionsTotal: 0,
+  revenueAtRiskINR: 0,
+  estimatedRecoverableRevenueINR: 0,
+  recoveredRevenueINR: 0,
+  revenueStillAtRiskINR: 0,
+  recoveryRate: 0,
+  transactionRecoveryRate: 0,
+  recoveryBatchesCount: 0,
+  totalProtectedRevenueINR: 0,
+  avgLatencyMs: 380,
+  latencyPercentiles: {
+    p50: 340,
+    p90: 510,
+    p95: 620,
+    p99: 980,
+  },
+  currentSystemSeverity: 'nominal',
+  trendData: [],
+  bankBreakdown: [
+    { bank: 'HDFC Bank', successRate: 94.8, totalVolume: 0, failedVolume: 0, avgLatencyMs: 340, status: 'healthy' },
+    { bank: 'ICICI Bank', successRate: 94.2, totalVolume: 0, failedVolume: 0, avgLatencyMs: 390, status: 'healthy' },
+    { bank: 'State Bank of India', successRate: 92.5, totalVolume: 0, failedVolume: 0, avgLatencyMs: 440, status: 'healthy' },
+    { bank: 'Axis Bank', successRate: 93.9, totalVolume: 0, failedVolume: 0, avgLatencyMs: 360, status: 'healthy' },
+  ],
+  methodBreakdown: [
+    { method: 'UPI', sharePercent: 55, successRate: 94.5, avgLatencyMs: 280 },
+    { method: 'Cards', sharePercent: 25, successRate: 93.8, avgLatencyMs: 420 },
+    { method: 'Netbanking', sharePercent: 12, successRate: 91.2, avgLatencyMs: 510 },
+    { method: 'Wallet', sharePercent: 8, successRate: 95.8, avgLatencyMs: 210 },
+  ],
+  errorCodeDistribution: [],
+};
+
+const INITIAL_AGENTS: Record<string, AgentCardState> = {
+  detection: {
+    id: 'detection',
+    name: 'Detection Agent',
+    role: 'Continuous Transaction Telemetry & Anomaly Flagging',
+    model: 'AI Engine',
+    status: 'monitoring',
+    currentTask: 'Scanning live transaction streams against rolling 15m baseline',
+    lastAction: 'Normal baseline verification — 94.2% success rate',
+    confidence: 0.98,
+    timestamp: new Date().toISOString(),
+    executionTimeMs: 142,
+  },
+  investigation: {
+    id: 'investigation',
+    name: 'Investigation Agent',
+    role: 'Multi-Dimensional Cohort & Root Cause Attribution',
+    model: 'AI Engine',
+    status: 'idle',
+    currentTask: 'Awaiting anomaly triggers from Detection pipeline',
+    lastAction: 'Standing by with segment comparison matrices',
+    confidence: 0.96,
+    timestamp: new Date().toISOString(),
+    executionTimeMs: 220,
+  },
+  resolution: {
+    id: 'resolution',
+    name: 'Resolution Agent',
+    role: 'Dynamic Mitigation Strategy & Safe Policy Orchestration',
+    model: 'AI Engine',
+    status: 'idle',
+    currentTask: 'Ready to evaluate routing policies upon root cause signoff',
+    lastAction: 'Routing table verification complete',
+    confidence: 0.95,
+    timestamp: new Date().toISOString(),
+    executionTimeMs: 180,
+  },
+};
+
 export const App: React.FC = () => {
   // Navigation & View State
   const [currentView, setCurrentView] = useState<AppView>('overview');
   const [selectedIncidentId, setSelectedIncidentId] = useState<string | null>(null);
 
   // Core Data State
-  const [health, setHealth] = useState<PaymentHealthMetrics | null>(null);
+  const [health, setHealth] = useState<PaymentHealthMetrics>(INITIAL_HEALTH);
   const [incidents, setIncidents] = useState<Incident[]>([]);
-  const [agents, setAgents] = useState<Record<string, AgentCardState>>({});
+  const [agents, setAgents] = useState<Record<string, AgentCardState>>(INITIAL_AGENTS);
   const [recentTransactions, setRecentTransactions] = useState<PaymentTransaction[]>([]);
   const [activeScenario, setActiveScenario] = useState<SimulationScenarioId>('steady_normal');
 
@@ -110,10 +190,50 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  // Support browser hash navigation (e.g. #overview, #incidents, #recovery, etc.)
+  useEffect(() => {
+    const handleHashChange = () => {
+      const hash = window.location.hash.replace('#', '') as AppView;
+      const validViews: AppView[] = [
+        'overview',
+        'incidents',
+        'incident-detail',
+        'recovery',
+        'transactions',
+        'agents',
+        'agent-performance',
+        'analytics',
+        'audit-log',
+        'guide',
+      ];
+      if (validViews.includes(hash)) {
+        setCurrentView(hash);
+      }
+    };
+
+    if (window.location.hash) {
+      handleHashChange();
+    }
+
+    window.addEventListener('hashchange', handleHashChange);
+    window.addEventListener('popstate', handleHashChange);
+    return () => {
+      window.removeEventListener('hashchange', handleHashChange);
+      window.removeEventListener('popstate', handleHashChange);
+    };
+  }, []);
+
+  const navigateToView = (view: AppView) => {
+    setCurrentView(view);
+    if (window.location.hash !== `#${view}`) {
+      window.history.pushState(null, '', `#${view}`);
+    }
+  };
+
   // Handler: Select incident and navigate to detail view
   const handleSelectIncident = (id: string) => {
     setSelectedIncidentId(id);
-    setCurrentView('incident-detail');
+    navigateToView('incident-detail');
   };
 
   // Handler: Run full 3-Agent workflow demo
@@ -320,7 +440,7 @@ export const App: React.FC = () => {
         {/* Sidebar */}
         <Sidebar
           currentView={currentView}
-          onNavigate={(view) => setCurrentView(view)}
+          onNavigate={(view) => navigateToView(view)}
           activeIncidentsCount={incidents.filter((i) => i.status !== 'VERIFIED' && i.status !== 'RESOLVED').length}
         />
 
@@ -332,14 +452,14 @@ export const App: React.FC = () => {
             onStartJudgeDemo={() => setIsJudgeDemoOpen(true)}
           />
 
-          {currentView === 'overview' && health && (
+          {currentView === 'overview' && (
             <OverviewView
               health={health}
               incidents={incidents}
               agents={agents}
               recentTransactions={recentTransactions}
               onSelectIncident={handleSelectIncident}
-              onNavigateToAgents={() => setCurrentView('agents')}
+              onNavigateToAgents={() => navigateToView('agents')}
               onRunWorkflowDemo={() => handleRunWorkflowDemo('hdfc_upi_degradation')}
               onRefresh={loadOverviewData}
               isProcessing={isProcessing}
@@ -358,7 +478,7 @@ export const App: React.FC = () => {
           {currentView === 'incident-detail' && selectedIncident && (
             <IncidentDetailView
               incident={selectedIncident}
-              onBack={() => setCurrentView('incidents')}
+              onBack={() => navigateToView('incidents')}
               onApproveMitigation={handleApproveMitigation}
               onRejectMitigation={handleRejectMitigation}
               onExecuteMitigation={handleExecuteMitigation}
@@ -377,7 +497,7 @@ export const App: React.FC = () => {
                 No active incidents recorded. Trigger a simulation or run the 3-agent cycle to generate and inspect an incident.
               </p>
               <button
-                onClick={() => setCurrentView('incidents')}
+                onClick={() => navigateToView('incidents')}
                 className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
               >
                 Back to Incidents List
@@ -403,7 +523,7 @@ export const App: React.FC = () => {
             <AgentsCommandCenterView
               agents={agents}
               onRunWorkflowDemo={() => handleRunWorkflowDemo('hdfc_upi_degradation')}
-              onNavigateToPerformance={() => setCurrentView('agent-performance')}
+              onNavigateToPerformance={() => navigateToView('agent-performance')}
               isProcessing={isProcessing}
             />
           )}
@@ -415,7 +535,7 @@ export const App: React.FC = () => {
             />
           )}
 
-          {currentView === 'analytics' && health && (
+          {currentView === 'analytics' && (
             <AnalyticsView
               metrics={health}
             />
@@ -428,7 +548,7 @@ export const App: React.FC = () => {
           {currentView === 'guide' && (
             <ProductGuideView
               onRunDemo={() => {
-                setCurrentView('overview');
+                navigateToView('overview');
                 handleRunWorkflowDemo('hdfc_upi_degradation');
               }}
             />

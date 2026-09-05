@@ -41,6 +41,23 @@ function formatNotice(error: any): string {
   return 'continuing with deterministic rule engine';
 }
 
+function isNonRetryableError(error: any): boolean {
+  if (!error) return false;
+  const raw = typeof error === 'string' ? error : (error.message || '');
+  const lower = raw.toLowerCase();
+  return (
+    raw.includes('429') ||
+    raw.includes('RESOURCE_EXHAUSTED') ||
+    lower.includes('quota') ||
+    raw.includes('400') ||
+    raw.includes('401') ||
+    raw.includes('403') ||
+    lower.includes('api_key') ||
+    lower.includes('invalid') ||
+    lower.includes('forbidden')
+  );
+}
+
 /**
  * Executes a Gemini generateContent request with multi-model fallback and exponential backoff retry.
  * Handles transient 503 (model high demand / UNAVAILABLE) and 429 rate limits gracefully.
@@ -59,7 +76,7 @@ async function callGeminiWithFallback(
   for (const model of candidateModels) {
     try {
       const timeoutPromise = new Promise<never>((_, reject) => 
-        setTimeout(() => reject(new Error('AI generation timed out after 4000ms')), 4000)
+        setTimeout(() => reject(new Error('AI generation timed out after 1500ms')), 1500)
       );
 
       const generatePromise = client.models.generateContent({
@@ -76,6 +93,10 @@ async function callGeminiWithFallback(
       }
     } catch (err: any) {
       lastError = err;
+      // If error is quota or credentials related or timed out, trying another model will only cause prolonged delay
+      if (isNonRetryableError(err) || (err?.message && err.message.includes('timed out'))) {
+        break;
+      }
       continue;
     }
   }
