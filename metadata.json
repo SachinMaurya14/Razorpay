@@ -1,0 +1,6 @@
+{
+  "name": "Razorpay",
+  "description": "AI-powered payment revenue recovery control plane that detects payment degradation, identifies root cause, qualifies recoverable revenue, selects bounded recovery strategies under policy controls, and verifies actual recovery outcomes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
