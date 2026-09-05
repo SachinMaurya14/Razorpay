@@ -58,7 +58,16 @@ export const api = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ scenario }),
     });
-    if (!res.ok) throw new Error('Failed to trigger incident workflow');
+    if (!res.ok) {
+      let msg = 'Failed to trigger incident workflow';
+      try {
+        const errJson = await res.json();
+        if (errJson?.error) msg = errJson.error;
+      } catch {
+        // use default
+      }
+      throw new Error(msg);
+    }
     return res.json();
   },
 

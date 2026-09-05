@@ -1,18 +1,38 @@
 import express from 'express';
-import path from 'path';
-import { createServer as createViteServer } from 'vite';
 import { incidentStore } from './server/incidentStore';
 import { syntheticEngine } from './server/syntheticData';
 import { agentPerformanceStore } from './server/agentPerformanceStore';
 import { SimulationScenarioId } from './src/types';
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+export const app = express();
 
-  app.use(express.json());
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
-  // === API ROUTES ===
+// Path normalization middleware: ensures /api prefixes are preserved on Vercel serverless functions
+app.use((req, res, next) => {
+  if (req.query && (req.query as any).all) {
+    const subpath = Array.isArray((req.query as any).all) 
+      ? (req.query as any).all.join('/') 
+      : (req.query as any).all;
+    req.url = '/' + subpath;
+  }
+  if (!req.url.startsWith('/api') && !req.url.startsWith('/@') && !req.url.startsWith('/src') && !req.url.startsWith('/index.html') && !req.url.startsWith('/favicon.ico')) {
+    const pathPart = req.url.split('?')[0];
+    const isKnownApi = [
+      '/health', '/overview', '/incidents', '/recovery-batches', '/recovery-opportunities',
+      '/recovery-scorecard', '/merchant-impact', '/search', '/transactions', '/audit-logs',
+      '/agents', '/simulation'
+    ].some(prefix => pathPart === prefix || pathPart.startsWith(prefix + '/'));
+    
+    if (isKnownApi) {
+      req.url = '/api' + req.url;
+    }
+  }
+  next();
+});
+
+// === API ROUTES ===
 
   // 1. Health check
   app.get('/api/health', (req, res) => {
@@ -111,7 +131,8 @@ async function startServer() {
   // 5. Trigger end-to-end incident demo simulation
   app.post('/api/incidents/run-demo', async (req, res) => {
     try {
-      const scenario = (req.body.scenario as any) || 'hdfc_upi_degradation';
+      const body = typeof req.body === 'object' && req.body !== null ? req.body : {};
+      const scenario = (body.scenario as any) || 'hdfc_upi_degradation';
       const incident = await incidentStore.triggerIncidentWorkflow(scenario);
       res.json({
         success: true,
@@ -145,7 +166,8 @@ async function startServer() {
 
   // 6. Human approval endpoint
   app.post('/api/incidents/:id/approve', (req, res) => {
-    const { approved, notes } = req.body;
+    const body = typeof req.body === 'object' && req.body !== null ? req.body : {};
+    const { approved, notes } = body;
     const updated = incidentStore.handleHumanApproval(req.params.id, Boolean(approved), notes);
     if (!updated) {
       return res.status(404).json({ error: 'Incident not found or cannot be approved' });
@@ -426,27 +448,35 @@ async function startServer() {
     });
   });
 
-  // === VITE MIDDLEWARE / SPA SERVING ===
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
+  // === STANDALONE SERVER STARTUP (DEV / DOCKER / PREVIEW) ===
+  if (!process.env.VERCEL) {
+    const startServer = async () => {
+      const PORT = 3000;
+      if (process.env.NODE_ENV !== 'production') {
+        const { createServer: createViteServer } = await import('vite');
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: 'spa',
+        });
+        app.use(vite.middlewares);
+      } else {
+        const path = await import('path');
+        const distPath = path.join(process.cwd(), 'dist');
+        app.use(express.static(distPath));
+        app.get('*', (req, res) => {
+          res.sendFile(path.join(distPath, 'index.html'));
+        });
+      }
+
+      app.listen(PORT, '0.0.0.0', () => {
+        console.log(`Razorpay Revenue Recovery server running on http://0.0.0.0:${PORT}`);
+      });
+    };
+
+    startServer().catch(err => {
+      console.error('Failed to start server:', err);
+      process.exit(1);
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Razorpay AI Operations server running on http://0.0.0.0:${PORT}`);
-  });
-}
-
-startServer().catch(err => {
-  console.error('Failed to start server:', err);
-  process.exit(1);
-});
+export default app;

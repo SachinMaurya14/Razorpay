@@ -243,9 +243,12 @@ export const App: React.FC = () => {
 
     try {
       const result = await api.runDemoIncident(scenario);
+      if (result?.incident) {
+        setIncidents(prev => [result.incident, ...prev.filter(i => i.id !== result.incident.id)]);
+      }
       await loadOverviewData();
       setSelectedIncidentId(result.incident.id);
-      setCurrentView('incident-detail');
+      navigateToView('incident-detail');
       showToast(`Incident ${result.incident.id} created and analyzed by 3 agents!`, 'success');
     } catch (err: any) {
       console.error('Workflow run failed:', err);

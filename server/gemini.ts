@@ -15,6 +15,10 @@ const getGeminiClient = () => {
   if (!apiKey || apiKey === 'MY_GEMINI_API_KEY' || apiKey.trim() === '') {
     return null;
   }
+  // gen-lang-client reference is a GCP client/project identifier, not an API key
+  if (apiKey.startsWith('gen-lang-client')) {
+    return null;
+  }
   return new GoogleGenAI({
     apiKey: apiKey,
     httpOptions: {
